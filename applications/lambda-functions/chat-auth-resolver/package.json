@@ -1,0 +1,33 @@
+{
+  "name": "chat-auth-resolver",
+  "version": "1.0.0",
+  "description": "Authentication resolver Lambda function for AppSync authorization",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "package": "zip -r ../chat-auth-resolver.zip ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.400.0",
+    "jsonwebtoken": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "appsync",
+    "authorization",
+    "cognito",
+    "jwt",
+    "authentication"
+  ],
+  "author": "AWS Education Platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

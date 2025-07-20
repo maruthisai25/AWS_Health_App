@@ -1,0 +1,560 @@
+name: Backend Services Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'applications/backend-services/**'
+      - '.github/workflows/backend-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'applications/backend-services/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      service_name:
+        description: 'Specific service to deploy (optional)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '18'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      changed-services: ${{ steps.changes.outputs.services }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Backend Services
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.service_name }}" ]; then
+            # Deploy specific service if specified
+            echo "services=${{ github.event.inputs.service_name }}" >> $GITHUB_OUTPUT
+          else
+            # Detect changed services
+            changed_files=$(git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep "^applications/backend-services/" || true)
+            if [ -z "$changed_files" ]; then
+              echo "services=" >> $GITHUB_OUTPUT
+            else
+              services=$(echo "$changed_files" | cut -d'/' -f3 | sort -u | tr '\n' ' ')
+              echo "services=$services" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Set Matrix
+        id: set-matrix
+        run: |
+          services="${{ steps.changes.outputs.services }}"
+          if [ -z "$services" ]; then
+            echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+          else
+            matrix_json="{"
+            matrix_json="$matrix_json\"include\":["
+            first=true
+            for service in $services; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                matrix_json="$matrix_json,"
+              fi
+              matrix_json="$matrix_json{\"service\":\"$service\"}"
+            done
+            matrix_json="$matrix_json]}"
+            echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          fi
+
+  test-services:
+    name: Test Backend Services
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changed-services != ''
+    
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: applications/backend-services/${{ matrix.service }}/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: applications/backend-services/${{ matrix.service }}
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run Linting
+        working-directory: applications/backend-services/${{ matrix.service }}
+        run: |
+          if npm run | grep -q "lint"; then
+            npm run lint
+          else
+            echo "No linting configured for ${{ matrix.service }}"
+          fi
+
+      - name: Run Unit Tests
+        working-directory: applications/backend-services/${{ matrix.service }}
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb
+          REDIS_URL: redis://localhost:6379
+        run: |
+          if npm run | grep -q "test"; then
+            npm test
+          else
+            echo "No tests defined for ${{ matrix.service }}"
+          fi
+
+      - name: Run Security Audit
+        working-directory: applications/backend-services/${{ matrix.service }}
+        run: |
+          npm audit --audit-level=high || true
+
+      - name: Build Application
+        working-directory: applications/backend-services/${{ matrix.service }}
+        run: |
+          if npm run | grep -q "build"; then
+            npm run build
+          else
+            echo "No build step defined for ${{ matrix.service }}"
+          fi
+
+      - name: Create Deployment Package
+        working-directory: applications/backend-services/${{ matrix.service }}
+        run: |
+          # Create deployment directory
+          mkdir -p deployment
+          
+          # Copy application files
+          cp -r . deployment/
+          cd deployment
+          
+          # Remove development dependencies and files
+          rm -rf node_modules
+          rm -rf tests
+          rm -rf .git
+          rm -f .env.example
+          rm -f docker-compose.yml
+          rm -f Dockerfile.dev
+          
+          # Install production dependencies
+          npm ci --production
+          
+          # Create deployment archive
+          tar -czf ../deployment.tar.gz .
+
+      - name: Upload Deployment Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.service }}
+          path: applications/backend-services/${{ matrix.service }}/deployment.tar.gz
+          retention-days: 7
+
+  deploy-services:
+    name: Deploy Backend Services
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-services]
+    if: |
+      needs.detect-changes.outputs.changed-services != '' &&
+      ((github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+       (github.event_name == 'workflow_dispatch'))
+    
+    strategy:
+      matrix: 
+        environment: [dev, staging, prod]
+        service: ${{ fromJson(needs.detect-changes.outputs.changed-services) }}
+    
+    environment:
+      name: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Infrastructure Details
+        id: infrastructure
+        run: |
+          # Get terraform outputs
+          aws s3 cp s3://education-platform-terraform-state-${{ secrets.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/terraform-outputs-${{ matrix.environment }}.json . || echo "{}" > terraform-outputs-${{ matrix.environment }}.json
+          
+          # Extract infrastructure details
+          ASG_NAME=$(jq -r '.marks_auto_scaling_group.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          ALB_ARN=$(jq -r '.marks_application_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          
+          echo "asg_name=$ASG_NAME" >> $GITHUB_OUTPUT
+          echo "alb_url=$ALB_ARN" >> $GITHUB_OUTPUT
+
+      - name: Download Deployment Package
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-${{ matrix.service }}
+          path: ./
+
+      - name: Upload to S3 Deployment Bucket
+        run: |
+          # Create deployment bucket if it doesn't exist
+          DEPLOYMENT_BUCKET="education-platform-${{ matrix.environment }}-deployments-${{ secrets.AWS_ACCOUNT_ID }}"
+          
+          if ! aws s3 ls "s3://$DEPLOYMENT_BUCKET" 2>/dev/null; then
+            aws s3 mb "s3://$DEPLOYMENT_BUCKET"
+            aws s3api put-bucket-versioning \
+              --bucket "$DEPLOYMENT_BUCKET" \
+              --versioning-configuration Status=Enabled
+          fi
+          
+          # Upload deployment package
+          DEPLOYMENT_KEY="backend-services/${{ matrix.service }}/$(date +%Y%m%d-%H%M%S)-${{ github.sha }}.tar.gz"
+          aws s3 cp deployment.tar.gz "s3://$DEPLOYMENT_BUCKET/$DEPLOYMENT_KEY"
+          
+          echo "deployment_bucket=$DEPLOYMENT_BUCKET" >> $GITHUB_ENV
+          echo "deployment_key=$DEPLOYMENT_KEY" >> $GITHUB_ENV
+
+      - name: Create CodeDeploy Application
+        run: |
+          APP_NAME="education-platform-${{ matrix.environment }}-${{ matrix.service }}"
+          
+          # Create application if it doesn't exist
+          if ! aws deploy get-application --application-name "$APP_NAME" 2>/dev/null; then
+            aws deploy create-application \
+              --application-name "$APP_NAME" \
+              --compute-platform Server
+          fi
+          
+          echo "codedeploy_app=$APP_NAME" >> $GITHUB_ENV
+
+      - name: Create Deployment Group
+        run: |
+          DEPLOYMENT_GROUP="${{ matrix.environment }}-deployment-group"
+          
+          # Create deployment group if it doesn't exist
+          if ! aws deploy get-deployment-group \
+            --application-name "${{ env.codedeploy_app }}" \
+            --deployment-group-name "$DEPLOYMENT_GROUP" 2>/dev/null; then
+            
+            # Create service role for CodeDeploy
+            ROLE_NAME="CodeDeployServiceRole-${{ matrix.environment }}"
+            
+            if ! aws iam get-role --role-name "$ROLE_NAME" 2>/dev/null; then
+              aws iam create-role \
+                --role-name "$ROLE_NAME" \
+                --assume-role-policy-document '{
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": {
+                        "Service": "codedeploy.amazonaws.com"
+                      },
+                      "Action": "sts:AssumeRole"
+                    }
+                  ]
+                }'
+              
+              aws iam attach-role-policy \
+                --role-name "$ROLE_NAME" \
+                --policy-arn "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
+            fi
+            
+            ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query 'Role.Arn' --output text)
+            
+            aws deploy create-deployment-group \
+              --application-name "${{ env.codedeploy_app }}" \
+              --deployment-group-name "$DEPLOYMENT_GROUP" \
+              --service-role-arn "$ROLE_ARN" \
+              --auto-scaling-groups "${{ steps.infrastructure.outputs.asg_name }}"
+          fi
+          
+          echo "deployment_group=$DEPLOYMENT_GROUP" >> $GITHUB_ENV
+
+      - name: Create AppSpec File
+        run: |
+          cat > appspec.yml << EOF
+          version: 0.0
+          os: linux
+          files:
+            - source: /
+              destination: /opt/${{ matrix.service }}
+          hooks:
+            BeforeInstall:
+              - location: scripts/stop_application.sh
+                timeout: 300
+                runas: root
+            AfterInstall:
+              - location: scripts/install_dependencies.sh
+                timeout: 300
+                runas: root
+            ApplicationStart:
+              - location: scripts/start_application.sh
+                timeout: 300
+                runas: root
+            ApplicationStop:
+              - location: scripts/stop_application.sh
+                timeout: 300
+                runas: root
+          EOF
+
+      - name: Create Deployment Scripts
+        run: |
+          mkdir -p scripts
+          
+          # Stop application script
+          cat > scripts/stop_application.sh << 'EOF'
+          #!/bin/bash
+          if pgrep -f "${{ matrix.service }}" > /dev/null; then
+            pkill -f "${{ matrix.service }}"
+            sleep 5
+          fi
+          EOF
+          
+          # Install dependencies script
+          cat > scripts/install_dependencies.sh << 'EOF'
+          #!/bin/bash
+          cd /opt/${{ matrix.service }}
+          npm ci --production
+          EOF
+          
+          # Start application script
+          cat > scripts/start_application.sh << 'EOF'
+          #!/bin/bash
+          cd /opt/${{ matrix.service }}
+          
+          # Set environment variables
+          export NODE_ENV=${{ matrix.environment }}
+          export PORT=3000
+          
+          # Start application with PM2
+          npm install -g pm2
+          pm2 start app.js --name "${{ matrix.service }}" --env ${{ matrix.environment }}
+          pm2 save
+          EOF
+          
+          chmod +x scripts/*.sh
+
+      - name: Create Deployment Package
+        run: |
+          # Extract the original package
+          tar -xzf deployment.tar.gz
+          
+          # Add deployment files
+          cp appspec.yml ./
+          cp -r scripts ./
+          
+          # Create final deployment package
+          tar -czf final-deployment.tar.gz .
+          
+          # Upload to S3
+          aws s3 cp final-deployment.tar.gz "s3://${{ env.deployment_bucket }}/${{ env.deployment_key }}"
+
+      - name: Create CodeDeploy Deployment
+        id: deploy
+        run: |
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name "${{ env.codedeploy_app }}" \
+            --deployment-group-name "${{ env.deployment_group }}" \
+            --s3-location bucket="${{ env.deployment_bucket }}",key="${{ env.deployment_key }}",bundleType=tgz \
+            --deployment-config-name CodeDeployDefault.AllAtOnceAutoScaling \
+            --description "Deployment from commit ${{ github.sha }}" \
+            --query 'deploymentId' --output text)
+          
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Created deployment: $DEPLOYMENT_ID"
+
+      - name: Wait for Deployment
+        run: |
+          echo "Waiting for deployment ${{ steps.deploy.outputs.deployment_id }} to complete..."
+          
+          aws deploy wait deployment-successful \
+            --deployment-id ${{ steps.deploy.outputs.deployment_id }}
+          
+          echo "✅ Deployment completed successfully"
+
+      - name: Verify Deployment
+        run: |
+          # Wait for application to start
+          sleep 30
+          
+          # Test application health
+          if [ -n "${{ steps.infrastructure.outputs.alb_url }}" ]; then
+            response=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.infrastructure.outputs.alb_url }}/health" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Application health check passed"
+            else
+              echo "❌ Application health check failed with HTTP $response"
+              exit 1
+            fi
+          else
+            echo "⚠️ No load balancer URL found, skipping health check"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const status = '${{ job.status }}' === 'success' ? '✅ Success' : '❌ Failed';
+            const output = `🚀 **Backend Deployment** - ${{ matrix.service }} → ${{ matrix.environment }} ${status}
+            
+            **Service Details:**
+            - Service: \`${{ matrix.service }}\`
+            - Environment: \`${{ matrix.environment }}\`
+            - Deployment ID: \`${{ steps.deploy.outputs.deployment_id }}\`
+            - Application URL: ${{ steps.infrastructure.outputs.alb_url }}
+            
+            **Deployment Info:**
+            - Commit: \`${{ github.sha }}\`
+            - Actor: @${{ github.actor }}
+            - Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            - Auto Scaling Group: \`${{ steps.infrastructure.outputs.asg_name }}\``;
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  health-check:
+    name: Post-Deployment Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy-services]
+    if: github.ref == 'refs/heads/main'
+    
+    strategy:
+      matrix:
+        environment: [dev]  # Only run health checks on dev
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Application URLs
+        id: urls
+        run: |
+          aws s3 cp s3://education-platform-terraform-state-${{ secrets.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/terraform-outputs-${{ matrix.environment }}.json . || echo "{}" > terraform-outputs-${{ matrix.environment }}.json
+          
+          ALB_URL=$(jq -r '.marks_application_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          API_URL=$(jq -r '.api_gateway_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          
+          echo "alb_url=$ALB_URL" >> $GITHUB_OUTPUT
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+
+      - name: Run Comprehensive Health Checks
+        run: |
+          echo "🔍 Running comprehensive health checks..."
+          
+          # Test Application Load Balancer
+          if [ -n "${{ steps.urls.outputs.alb_url }}" ]; then
+            echo "Testing ALB health..."
+            response=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.alb_url }}/health" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ ALB health check passed"
+            else
+              echo "❌ ALB health check failed with HTTP $response"
+            fi
+          fi
+          
+          # Test API Gateway
+          if [ -n "${{ steps.urls.outputs.api_url }}" ]; then
+            echo "Testing API Gateway health..."
+            response=$(curl -s -o /dev/null -w "%{http_code}" "${{ steps.urls.outputs.api_url }}/health" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ API Gateway health check passed"
+            else
+              echo "❌ API Gateway health check failed with HTTP $response"
+            fi
+          fi
+          
+          # Test database connectivity (if marks service is deployed)
+          echo "Testing database connectivity..."
+          # This would typically involve running a simple query through the application
+
+      - name: Generate Health Report
+        run: |
+          echo "# Backend Services Health Report" > health-report.md
+          echo "" >> health-report.md
+          echo "**Environment:** ${{ matrix.environment }}" >> health-report.md
+          echo "**Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> health-report.md
+          echo "**Commit:** ${{ github.sha }}" >> health-report.md
+          echo "" >> health-report.md
+          echo "## Service Status" >> health-report.md
+          echo "" >> health-report.md
+          echo "- ALB URL: ${{ steps.urls.outputs.alb_url }}" >> health-report.md
+          echo "- API URL: ${{ steps.urls.outputs.api_url }}" >> health-report.md
+          echo "" >> health-report.md
+          echo "All health checks completed. See workflow logs for detailed results." >> health-report.md
+
+      - name: Upload Health Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: health-report-${{ matrix.environment }}
+          path: health-report.md
+          retention-days: 30

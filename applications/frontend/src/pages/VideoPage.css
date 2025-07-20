@@ -1,0 +1,84 @@
+  }
+  
+  .video-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  
+  .video-page-header h1 {
+    font-size: 28px;
+  }
+  
+  .video-content {
+    gap: 20px;
+  }
+  
+  .video-info {
+    padding: 20px;
+  }
+  
+  .video-meta h2 {
+    font-size: 20px;
+  }
+  
+  .video-stats {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .instructor-info {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .video-library {
+    padding: 20px;
+  }
+  
+  .video-list {
+    grid-template-columns: 1fr;
+  }
+  
+  .upload-modal {
+    width: 95%;
+    margin: 16px;
+  }
+  
+  .upload-modal-header,
+  .upload-modal-content {
+    padding: 20px;
+  }
+  
+  .upload-area {
+    padding: 32px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .video-page {
+    padding: 12px;
+  }
+  
+  .video-page-header h1 {
+    font-size: 24px;
+  }
+  
+  .video-item {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .video-thumbnail {
+    width: 100%;
+    height: 120px;
+  }
+  
+  .upload-area {
+    padding: 24px 12px;
+  }
+  
+  .upload-icon {
+    font-size: 36px;
+  }
+}

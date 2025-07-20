@@ -1,0 +1,18 @@
+## Search Messages Request - Delegate to Lambda for OpenSearch functionality
+
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "action": "searchMessages",
+    "query": "$ctx.args.query",
+    "roomId": "$util.defaultIfNull($ctx.args.roomId, '')",
+    "userId": "$util.defaultIfNull($ctx.args.userId, '')",
+    "messageType": "$util.defaultIfNull($ctx.args.messageType, '')",
+    "fromDate": "$util.defaultIfNull($ctx.args.fromDate, '')",
+    "toDate": "$util.defaultIfNull($ctx.args.toDate, '')",
+    "limit": $ctx.args.limit,
+    "nextToken": "$util.defaultIfNull($ctx.args.nextToken, '')",
+    "identity": $util.toJson($ctx.identity)
+  }
+}

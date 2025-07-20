@@ -1,0 +1,18 @@
+## Update Presence Response - Return updated presence
+
+#if($ctx.error)
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+
+{
+  "userId": "$ctx.result.user_id.S",
+  "status": "$ctx.result.status.S",
+  "lastSeen": "$ctx.result.last_seen.N",
+  #if($ctx.result.room_id)
+  "currentRoom": "$ctx.result.room_id.S",
+  #end
+  #if($ctx.result.custom_status)
+  "customStatus": "$ctx.result.custom_status.S",
+  #end
+  "metadata": $util.parseJson($ctx.result.metadata.S)
+}

@@ -1,0 +1,59 @@
+  }
+}
+
+/* Accessibility */
+.video-player:focus {
+  outline: 2px solid #ff6b6b;
+  outline-offset: 2px;
+}
+
+.control-button:focus {
+  outline: 2px solid #ff6b6b;
+  outline-offset: 2px;
+}
+
+.volume-slider:focus {
+  outline: 2px solid #ff6b6b;
+  outline-offset: 2px;
+}
+
+.playback-rate:focus,
+.quality-selector:focus {
+  outline: 2px solid #ff6b6b;
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .video-controls {
+    background: rgba(0, 0, 0, 0.95);
+  }
+  
+  .progress-container {
+    background: rgba(255, 255, 255, 0.8);
+  }
+  
+  .control-button:hover {
+    background: rgba(255, 255, 255, 0.9);
+    color: #000;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .video-controls,
+  .video-title-overlay,
+  .control-button,
+  .progress-container,
+  .spinner {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Dark theme support */
+@media (prefers-color-scheme: dark) {
+  .video-player {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "video-processor",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for processing video uploads and creating transcoding jobs",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "package": "zip -r video-processor.zip . -x '*.git*' 'node_modules/.cache/*' 'tests/*' '*.md'"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "video",
+    "transcoding",
+    "elastic-transcoder",
+    "s3"
+  ],
+  "author": "AWS Education Platform Team",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.1471.0"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "eslint": "^8.42.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/aws-education-platform"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverage": true,
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["text", "lcov"]
+  },
+  "eslintConfig": {
+    "env": {
+      "es2021": true,
+      "node": true
+    },
+    "extends": "eslint:recommended",
+    "parserOptions": {
+      "ecmaVersion": 2021
+    },
+    "rules": {
+      "no-console": "off",
+      "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+    }
+  }
+}

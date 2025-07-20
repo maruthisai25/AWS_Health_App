@@ -1,0 +1,37 @@
+## Get Messages Response - Return messages with pagination info
+
+#if($ctx.error)
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+
+{
+  "items": [
+    #foreach($item in $ctx.result.items)
+      {
+        "messageId": "$item.message_id.S",
+        "roomId": "$item.room_id.S",
+        "userId": "$item.user_id.S",
+        "content": "$item.content.S",
+        "messageType": "$item.message_type.S",
+        "timestamp": "$item.timestamp.N",
+        #if($item.edited_at)
+        "editedAt": "$item.edited_at.S",
+        #end
+        #if($item.reply_to_message_id)
+        "replyToMessageId": "$item.reply_to_message_id.S",
+        #end
+        #if($item.attachments)
+        "attachments": $util.toJson($item.attachments.L),
+        #end
+        #if($item.metadata)
+        "metadata": $util.toJson($item.metadata.S)
+        #end
+      }
+      #if($foreach.hasNext),#end
+    #end
+  ],
+  #if($ctx.result.nextToken)
+  "nextToken": "$ctx.result.nextToken",
+  #end
+  "total": $ctx.result.scannedCount
+}

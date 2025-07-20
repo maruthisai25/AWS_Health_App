@@ -1,0 +1,21 @@
+## Send Message Request - Pipeline resolver entry point
+
+## Validate input
+#if(!$ctx.args.input.roomId || !$ctx.args.input.content)
+  $util.error("roomId and content are required", "ValidationError")
+#end
+
+## Check message length
+#if($ctx.args.input.content.length() > 1000)
+  $util.error("Message content exceeds maximum length", "ValidationError")
+#end
+
+## Pass through to pipeline functions
+{
+  "version": "2018-05-29",
+  "payload": {
+    "input": $util.toJson($ctx.args.input),
+    "identity": $util.toJson($ctx.identity),
+    "timestamp": $util.time.nowEpochMilliSeconds()
+  }
+}

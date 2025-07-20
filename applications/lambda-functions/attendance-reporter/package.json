@@ -1,0 +1,38 @@
+{
+  "name": "attendance-reporter",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for generating attendance reports and analytics",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1490.0",
+    "uuid": "^9.0.1",
+    "moment": "^2.29.4",
+    "json2csv": "^6.1.0",
+    "lodash": "^4.17.21",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^8.52.0",
+    "prettier": "^3.0.3"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "attendance",
+    "reporting",
+    "analytics",
+    "csv",
+    "education"
+  ],
+  "author": "AWS Education Platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

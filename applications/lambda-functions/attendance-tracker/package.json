@@ -1,0 +1,39 @@
+{
+  "name": "attendance-tracker",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for attendance tracking with geolocation validation and QR code support",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1490.0",
+    "uuid": "^9.0.1",
+    "qrcode": "^1.5.3",
+    "joi": "^17.11.0",
+    "moment": "^2.29.4",
+    "geolib": "^3.3.4",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^8.52.0",
+    "prettier": "^3.0.3"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "attendance",
+    "tracking",
+    "geolocation",
+    "qr-code",
+    "education"
+  ],
+  "author": "AWS Education Platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

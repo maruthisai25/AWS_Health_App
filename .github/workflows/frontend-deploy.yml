@@ -1,0 +1,343 @@
+name: Frontend Application Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'applications/frontend/**'
+      - '.github/workflows/frontend-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'applications/frontend/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  NODE_VERSION: '18'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  test:
+    name: Test Frontend Application
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: applications/frontend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: applications/frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: applications/frontend
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Run Tests
+        working-directory: applications/frontend
+        run: npm run test -- --coverage --watchAll=false
+        env:
+          CI: true
+
+      - name: Upload Test Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: applications/frontend/coverage/lcov.info
+          flags: frontend
+          name: frontend-coverage
+
+      - name: Build Application
+        working-directory: applications/frontend
+        run: npm run build
+        env:
+          CI: false
+          GENERATE_SOURCEMAP: false
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: applications/frontend/build/
+          retention-days: 7
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: applications/frontend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: applications/frontend
+        run: npm ci
+
+      - name: Run npm audit
+        working-directory: applications/frontend
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Run Snyk Security Scan
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=applications/frontend/package.json --severity-threshold=high
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to S3 and CloudFront
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: |
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch')
+    
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    # Deploy environments sequentially
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ steps.get-outputs.outputs.website_url }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Terraform Outputs
+        id: get-outputs
+        run: |
+          # Get the latest terraform outputs for this environment
+          aws s3 cp s3://education-platform-terraform-state-${{ secrets.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/terraform-outputs-${{ matrix.environment }}.json . || echo "{}" > terraform-outputs-${{ matrix.environment }}.json
+          
+          # Extract values
+          S3_BUCKET=$(jq -r '.s3_bucket_name.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          CLOUDFRONT_ID=$(jq -r '.cloudfront_distribution_id.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          WEBSITE_URL=$(jq -r '.website_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          API_URL=$(jq -r '.api_gateway_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          USER_POOL_ID=$(jq -r '.user_pool_id.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          USER_POOL_CLIENT_ID=$(jq -r '.user_pool_client_id.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          
+          echo "s3_bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+          echo "cloudfront_id=$CLOUDFRONT_ID" >> $GITHUB_OUTPUT
+          echo "website_url=$WEBSITE_URL" >> $GITHUB_OUTPUT
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "user_pool_client_id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: applications/frontend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: applications/frontend
+        run: npm ci
+
+      - name: Create Environment Configuration
+        working-directory: applications/frontend
+        run: |
+          cat > .env.production << EOF
+          REACT_APP_API_URL=${{ steps.get-outputs.outputs.api_url }}
+          REACT_APP_USER_POOL_ID=${{ steps.get-outputs.outputs.user_pool_id }}
+          REACT_APP_USER_POOL_CLIENT_ID=${{ steps.get-outputs.outputs.user_pool_client_id }}
+          REACT_APP_WEBSITE_URL=${{ steps.get-outputs.outputs.website_url }}
+          REACT_APP_ENVIRONMENT=${{ matrix.environment }}
+          REACT_APP_VERSION=${{ github.sha }}
+          REACT_APP_BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          EOF
+
+      - name: Build Application
+        working-directory: applications/frontend
+        run: npm run build
+        env:
+          CI: false
+          GENERATE_SOURCEMAP: ${{ matrix.environment == 'dev' }}
+
+      - name: Deploy to S3
+        working-directory: applications/frontend
+        run: |
+          if [ -n "${{ steps.get-outputs.outputs.s3_bucket }}" ]; then
+            # Sync build files to S3
+            aws s3 sync build/ s3://${{ steps.get-outputs.outputs.s3_bucket }}/ \
+              --delete \
+              --cache-control "public, max-age=31536000" \
+              --exclude "*.html" \
+              --exclude "service-worker.js" \
+              --exclude "manifest.json"
+            
+            # Upload HTML files with no-cache
+            aws s3 sync build/ s3://${{ steps.get-outputs.outputs.s3_bucket }}/ \
+              --delete \
+              --cache-control "public, max-age=0, must-revalidate" \
+              --include "*.html" \
+              --include "service-worker.js" \
+              --include "manifest.json"
+            
+            echo "✅ Frontend deployed to S3 bucket: ${{ steps.get-outputs.outputs.s3_bucket }}"
+          else
+            echo "❌ S3 bucket name not found in terraform outputs"
+            exit 1
+          fi
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          if [ -n "${{ steps.get-outputs.outputs.cloudfront_id }}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ steps.get-outputs.outputs.cloudfront_id }} \
+              --paths "/*"
+            echo "✅ CloudFront cache invalidated for distribution: ${{ steps.get-outputs.outputs.cloudfront_id }}"
+          else
+            echo "❌ CloudFront distribution ID not found in terraform outputs"
+            exit 1
+          fi
+
+      - name: Run Smoke Tests
+        working-directory: applications/frontend
+        run: |
+          # Wait for CloudFront invalidation to complete
+          sleep 30
+          
+          # Test website accessibility
+          if [ -n "${{ steps.get-outputs.outputs.website_url }}" ]; then
+            response=$(curl -s -o /dev/null -w "%{http_code}" ${{ steps.get-outputs.outputs.website_url }})
+            if [ $response -eq 200 ]; then
+              echo "✅ Website is accessible: ${{ steps.get-outputs.outputs.website_url }}"
+            else
+              echo "❌ Website returned HTTP $response"
+              exit 1
+            fi
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const status = '${{ job.status }}' === 'success' ? '✅ Success' : '❌ Failed';
+            const output = `🚀 **Frontend Deployment** - ${{ matrix.environment }} ${status}
+            
+            **Deployment Details:**
+            - Environment: \`${{ matrix.environment }}\`
+            - Website URL: ${{ steps.get-outputs.outputs.website_url }}
+            - S3 Bucket: \`${{ steps.get-outputs.outputs.s3_bucket }}\`
+            - CloudFront ID: \`${{ steps.get-outputs.outputs.cloudfront_id }}\`
+            - Commit: \`${{ github.sha }}\`
+            - Build Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            **Build Info:**
+            - Node.js Version: ${{ env.NODE_VERSION }}
+            - Source Maps: ${{ matrix.environment == 'dev' && 'Enabled' || 'Disabled' }}
+            - Cache Strategy: Static assets (1 year), HTML (no-cache)`;
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  lighthouse:
+    name: Lighthouse Performance Audit
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main'
+    
+    strategy:
+      matrix:
+        environment: [dev]  # Only run on dev for cost optimization
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Website URL
+        id: get-url
+        run: |
+          aws s3 cp s3://education-platform-terraform-state-${{ secrets.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/terraform-outputs-${{ matrix.environment }}.json . || echo "{}" > terraform-outputs-${{ matrix.environment }}.json
+          WEBSITE_URL=$(jq -r '.website_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          echo "website_url=$WEBSITE_URL" >> $GITHUB_OUTPUT
+
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          urls: |
+            ${{ steps.get-url.outputs.website_url }}
+          configPath: applications/frontend/.lighthouserc.json
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+      - name: Comment Lighthouse Results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('.lighthouseci/lhci_reports/manifest.json'));
+            const summary = results[0].summary;
+            
+            const output = `## 🔍 Lighthouse Performance Audit
+            
+            **Performance Scores:**
+            - Performance: ${Math.round(summary.performance * 100)}
+            - Accessibility: ${Math.round(summary.accessibility * 100)}
+            - Best Practices: ${Math.round(summary['best-practices'] * 100)}
+            - SEO: ${Math.round(summary.seo * 100)}
+            
+            **Environment:** ${{ matrix.environment }}
+            **URL:** ${{ steps.get-url.outputs.website_url }}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })

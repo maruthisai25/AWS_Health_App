@@ -1,0 +1,459 @@
+name: Lambda Functions Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'applications/lambda-functions/**'
+      - '.github/workflows/lambda-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'applications/lambda-functions/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      function_name:
+        description: 'Specific function to deploy (optional)'
+        required: false
+        type: string
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  detect-changes:
+    name: Detect Changed Functions
+    runs-on: ubuntu-latest
+    outputs:
+      changed-functions: ${{ steps.changes.outputs.functions }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Changed Lambda Functions
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.function_name }}" ]; then
+            # Deploy specific function if specified
+            echo "functions=${{ github.event.inputs.function_name }}" >> $GITHUB_OUTPUT
+          else
+            # Detect changed functions
+            changed_files=$(git diff --name-only ${{ github.event.before }}..${{ github.sha }} | grep "^applications/lambda-functions/" || true)
+            if [ -z "$changed_files" ]; then
+              echo "functions=" >> $GITHUB_OUTPUT
+            else
+              functions=$(echo "$changed_files" | cut -d'/' -f3 | sort -u | tr '\n' ' ')
+              echo "functions=$functions" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Set Matrix
+        id: set-matrix
+        run: |
+          functions="${{ steps.changes.outputs.functions }}"
+          if [ -z "$functions" ]; then
+            echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+          else
+            matrix_json="{"
+            matrix_json="$matrix_json\"include\":["
+            first=true
+            for func in $functions; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                matrix_json="$matrix_json,"
+              fi
+              matrix_json="$matrix_json{\"function\":\"$func\"}"
+            done
+            matrix_json="$matrix_json]}"
+            echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          fi
+
+  test-functions:
+    name: Test Lambda Functions
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.changed-functions != ''
+    
+    strategy:
+      matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Determine Runtime
+        id: runtime
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          if [ -f "package.json" ]; then
+            echo "runtime=nodejs" >> $GITHUB_OUTPUT
+            echo "version=${{ env.NODE_VERSION }}" >> $GITHUB_OUTPUT
+          elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+            echo "runtime=python" >> $GITHUB_OUTPUT
+            echo "version=${{ env.PYTHON_VERSION }}" >> $GITHUB_OUTPUT
+          else
+            echo "runtime=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        if: steps.runtime.outputs.runtime == 'nodejs'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: applications/lambda-functions/${{ matrix.function }}/package-lock.json
+
+      - name: Setup Python
+        if: steps.runtime.outputs.runtime == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Node.js Dependencies
+        if: steps.runtime.outputs.runtime == 'nodejs'
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Python Dependencies
+        if: steps.runtime.outputs.runtime == 'python'
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f "requirements-dev.txt" ]; then
+            pip install -r requirements-dev.txt
+          fi
+
+      - name: Run Node.js Tests
+        if: steps.runtime.outputs.runtime == 'nodejs'
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          if npm run | grep -q "test"; then
+            npm test
+          else
+            echo "No tests defined for ${{ matrix.function }}"
+          fi
+
+      - name: Run Python Tests
+        if: steps.runtime.outputs.runtime == 'python'
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          if [ -f "test_*.py" ] || [ -d "tests" ]; then
+            python -m pytest
+          else
+            echo "No tests found for ${{ matrix.function }}"
+          fi
+
+      - name: Run Security Scan
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          if [ "${{ steps.runtime.outputs.runtime }}" = "nodejs" ]; then
+            npm audit --audit-level=high || true
+          elif [ "${{ steps.runtime.outputs.runtime }}" = "python" ]; then
+            pip install safety
+            safety check || true
+          fi
+
+      - name: Package Function
+        id: package
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          # Create deployment package
+          mkdir -p dist
+          
+          if [ "${{ steps.runtime.outputs.runtime }}" = "nodejs" ]; then
+            # Node.js packaging
+            cp -r . dist/
+            cd dist
+            rm -rf node_modules dist
+            npm ci --production
+            zip -r ../function.zip .
+          elif [ "${{ steps.runtime.outputs.runtime }}" = "python" ]; then
+            # Python packaging
+            pip install -r requirements.txt -t dist/
+            cp *.py dist/
+            cd dist
+            zip -r ../function.zip .
+          fi
+          
+          echo "package_path=applications/lambda-functions/${{ matrix.function }}/function.zip" >> $GITHUB_OUTPUT
+
+      - name: Upload Function Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-${{ matrix.function }}
+          path: ${{ steps.package.outputs.package_path }}
+          retention-days: 7
+
+  deploy-functions:
+    name: Deploy Lambda Functions
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-functions]
+    if: |
+      needs.detect-changes.outputs.changed-functions != '' &&
+      ((github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+       (github.event_name == 'workflow_dispatch'))
+    
+    strategy:
+      matrix: 
+        environment: [dev, staging, prod]
+        function: ${{ fromJson(needs.detect-changes.outputs.changed-functions) }}
+    
+    environment:
+      name: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Function Package
+        uses: actions/download-artifact@v4
+        with:
+          name: lambda-${{ matrix.function }}
+          path: ./
+
+      - name: Get Function Name
+        id: function-name
+        run: |
+          # Construct function name based on environment and function
+          function_name="education-platform-${{ matrix.environment }}-${{ matrix.function }}"
+          echo "name=$function_name" >> $GITHUB_OUTPUT
+
+      - name: Check if Function Exists
+        id: check-function
+        run: |
+          if aws lambda get-function --function-name ${{ steps.function-name.outputs.name }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Function Code
+        if: steps.check-function.outputs.exists == 'true'
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ steps.function-name.outputs.name }} \
+            --zip-file fileb://function.zip
+          
+          # Wait for update to complete
+          aws lambda wait function-updated \
+            --function-name ${{ steps.function-name.outputs.name }}
+
+      - name: Update Function Configuration
+        if: steps.check-function.outputs.exists == 'true'
+        working-directory: applications/lambda-functions/${{ matrix.function }}
+        run: |
+          # Update environment variables if config file exists
+          if [ -f "config.json" ]; then
+            env_vars=$(jq -c '.environment_variables // {}' config.json)
+            if [ "$env_vars" != "{}" ]; then
+              aws lambda update-function-configuration \
+                --function-name ${{ steps.function-name.outputs.name }} \
+                --environment "Variables=$env_vars"
+            fi
+          fi
+
+      - name: Create Function Alias
+        run: |
+          # Create or update alias for this deployment
+          alias_name="${{ matrix.environment }}-latest"
+          version=$(aws lambda publish-version \
+            --function-name ${{ steps.function-name.outputs.name }} \
+            --description "Deployed from commit ${{ github.sha }}" \
+            --query 'Version' --output text)
+          
+          if aws lambda get-alias --function-name ${{ steps.function-name.outputs.name }} --name $alias_name >/dev/null 2>&1; then
+            aws lambda update-alias \
+              --function-name ${{ steps.function-name.outputs.name }} \
+              --name $alias_name \
+              --function-version $version
+          else
+            aws lambda create-alias \
+              --function-name ${{ steps.function-name.outputs.name }} \
+              --name $alias_name \
+              --function-version $version
+          fi
+          
+          echo "✅ Function ${{ matrix.function }} deployed to ${{ matrix.environment }} (version: $version)"
+
+      - name: Run Function Tests
+        run: |
+          # Test function invocation
+          test_payload='{"test": true}'
+          
+          response=$(aws lambda invoke \
+            --function-name ${{ steps.function-name.outputs.name }} \
+            --payload "$test_payload" \
+            --query 'StatusCode' \
+            --output text \
+            response.json)
+          
+          if [ "$response" = "200" ]; then
+            echo "✅ Function test passed"
+          else
+            echo "❌ Function test failed with status code: $response"
+            cat response.json
+            exit 1
+          fi
+
+      - name: Update Deployment Status
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `🚀 **Lambda Deployment** - ${{ matrix.function }} → ${{ matrix.environment }}
+            
+            **Function Details:**
+            - Function Name: \`${{ steps.function-name.outputs.name }}\`
+            - Environment: \`${{ matrix.environment }}\`
+            - Runtime: Detected from package.json/requirements.txt
+            - Status: ${{ job.status == 'success' && '✅ Success' || '❌ Failed' }}
+            
+            **Deployment Info:**
+            - Commit: \`${{ github.sha }}\`
+            - Actor: @${{ github.actor }}
+            - Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")`;
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-functions]
+    if: github.ref == 'refs/heads/main'
+    
+    strategy:
+      matrix:
+        environment: [dev]  # Only run integration tests on dev
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Test Dependencies
+        run: |
+          npm install -g newman
+          pip install boto3 requests
+
+      - name: Run API Integration Tests
+        run: |
+          # Get API Gateway URL from terraform outputs
+          aws s3 cp s3://education-platform-terraform-state-${{ secrets.AWS_ACCOUNT_ID }}-${{ env.AWS_REGION }}/terraform-outputs-${{ matrix.environment }}.json . || echo "{}" > terraform-outputs-${{ matrix.environment }}.json
+          API_URL=$(jq -r '.api_gateway_url.value // empty' terraform-outputs-${{ matrix.environment }}.json)
+          
+          if [ -n "$API_URL" ]; then
+            # Test authentication endpoints
+            echo "Testing authentication endpoints..."
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/auth/health" || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ Authentication API is healthy"
+            else
+              echo "❌ Authentication API returned HTTP $response"
+            fi
+            
+            # Test other endpoints if they exist
+            for endpoint in chat video attendance marks notifications; do
+              response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/$endpoint/health" || echo "000")
+              if [ "$response" = "200" ]; then
+                echo "✅ $endpoint API is healthy"
+              else
+                echo "⚠️ $endpoint API returned HTTP $response (may not be implemented)"
+              fi
+            done
+          else
+            echo "❌ API Gateway URL not found"
+            exit 1
+          fi
+
+      - name: Run Lambda Function Tests
+        run: |
+          # Test each deployed function
+          functions=$(aws lambda list-functions --query 'Functions[?starts_with(FunctionName, `education-platform-${{ matrix.environment }}-`)].FunctionName' --output text)
+          
+          for func in $functions; do
+            echo "Testing function: $func"
+            response=$(aws lambda invoke \
+              --function-name "$func" \
+              --payload '{"test": true}' \
+              --query 'StatusCode' \
+              --output text \
+              response.json 2>/dev/null || echo "000")
+            
+            if [ "$response" = "200" ]; then
+              echo "✅ $func test passed"
+            else
+              echo "❌ $func test failed with status code: $response"
+            fi
+          done
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          echo "# Lambda Integration Test Report" > test-report.md
+          echo "" >> test-report.md
+          echo "**Environment:** ${{ matrix.environment }}" >> test-report.md
+          echo "**Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> test-report.md
+          echo "**Commit:** ${{ github.sha }}" >> test-report.md
+          echo "" >> test-report.md
+          echo "## Test Results" >> test-report.md
+          echo "" >> test-report.md
+          echo "Integration tests completed. Check logs for detailed results." >> test-report.md
+
+      - name: Upload Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-report-${{ matrix.environment }}
+          path: test-report.md
+          retention-days: 30

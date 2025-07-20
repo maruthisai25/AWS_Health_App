@@ -1,0 +1,35 @@
+## Create Message Function Request - Add new message to DynamoDB
+
+#set($messageId = $util.autoUlid())
+#set($timestamp = $ctx.stash.timestamp)
+#set($ttl = $timestamp / 1000 + 7776000) ## 90 days TTL
+
+{
+  "version": "2017-02-28",
+  "operation": "PutItem",
+  "key": {
+    "room_id": $util.dynamodb.toDynamoDBJson($ctx.stash.input.roomId),
+    "message_id": $util.dynamodb.toDynamoDBJson($messageId)
+  },
+  "attributeValues": {
+    "user_id": $util.dynamodb.toDynamoDBJson($ctx.identity.sub),
+    "content": $util.dynamodb.toDynamoDBJson($ctx.stash.input.content),
+    "message_type": $util.dynamodb.toDynamoDBJson($util.defaultIfNull($ctx.stash.input.messageType, "TEXT")),
+    "timestamp": $util.dynamodb.toDynamoDBJson($timestamp),
+    "ttl": $util.dynamodb.toDynamoDBJson($ttl),
+    #if($ctx.stash.input.replyToMessageId)
+    "reply_to_message_id": $util.dynamodb.toDynamoDBJson($ctx.stash.input.replyToMessageId),
+    #end
+    #if($ctx.stash.input.attachments)
+    "attachments": $util.dynamodb.toDynamoDBJson($ctx.stash.input.attachments),
+    #end
+    #if($ctx.stash.input.metadata)
+    "metadata": $util.dynamodb.toDynamoDBJson($util.toJson($ctx.stash.input.metadata))
+    #else
+    "metadata": $util.dynamodb.toDynamoDBJson("{}")
+    #end
+  },
+  "condition": {
+    "expression": "attribute_not_exists(message_id)"
+  }
+}

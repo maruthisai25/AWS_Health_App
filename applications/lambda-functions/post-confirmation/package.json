@@ -1,0 +1,12 @@
+{
+  "name": "post-confirmation",
+  "version": "1.0.0",
+  "description": "Post-confirmation Lambda function for AWS Education Platform",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1490.0"
+  },
+  "keywords": ["aws", "lambda", "cognito", "post-confirmation"],
+  "author": "Education Platform Team",
+  "license": "MIT"
+}

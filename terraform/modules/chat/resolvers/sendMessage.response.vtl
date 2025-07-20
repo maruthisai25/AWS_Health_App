@@ -1,0 +1,8 @@
+## Send Message Response - Return the created message
+
+#if($ctx.error)
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+
+## Return the message created by the pipeline
+$util.toJson($ctx.result)

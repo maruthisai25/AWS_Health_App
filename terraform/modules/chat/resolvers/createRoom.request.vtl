@@ -1,0 +1,11 @@
+## Create Room Request - Delegate to Lambda for complex room creation logic
+
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "action": "createRoom",
+    "input": $util.toJson($ctx.args.input),
+    "identity": $util.toJson($ctx.identity)
+  }
+}

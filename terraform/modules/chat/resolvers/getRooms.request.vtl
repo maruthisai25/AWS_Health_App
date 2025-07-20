@@ -1,0 +1,14 @@
+## Get Rooms Request - Delegate to Lambda for user room lookup with join
+
+{
+  "version": "2018-05-29",
+  "operation": "Invoke",
+  "payload": {
+    "action": "getUserRooms",
+    "userId": "$ctx.args.userId",
+    "roomType": "$util.defaultIfNull($ctx.args.roomType, '')",
+    "limit": $ctx.args.limit,
+    "nextToken": "$util.defaultIfNull($ctx.args.nextToken, '')",
+    "identity": $util.toJson($ctx.identity)
+  }
+}

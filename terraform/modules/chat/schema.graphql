@@ -1,0 +1,404 @@
+# GraphQL Schema for Chat System
+
+type Query {
+  # Get messages for a specific room with pagination
+  getMessages(
+    roomId: ID!
+    limit: Int = 20
+    nextToken: String
+    sortDirection: SortDirection = DESC
+  ): MessageConnection
+
+  # Get rooms for a user
+  getRooms(
+    userId: ID!
+    roomType: RoomType
+    limit: Int = 50
+    nextToken: String
+  ): RoomConnection
+
+  # Get room details
+  getRoom(roomId: ID!): Room
+
+  # Search messages across rooms
+  searchMessages(
+    query: String!
+    roomId: ID
+    userId: ID
+    messageType: MessageType
+    fromDate: AWSDateTime
+    toDate: AWSDateTime
+    limit: Int = 20
+    nextToken: String
+  ): MessageConnection
+
+  # Get user presence information
+  getUserPresence(userId: ID!): UserPresence
+
+  # Get room members and their presence
+  getRoomMembers(
+    roomId: ID!
+    limit: Int = 100
+    nextToken: String
+  ): RoomMemberConnection
+
+  # Get typing indicators for a room
+  getTypingUsers(roomId: ID!): [TypingIndicator]
+}
+
+type Mutation {
+  # Send a message to a room
+  sendMessage(input: SendMessageInput!): Message
+
+  # Create a new chat room
+  createRoom(input: CreateRoomInput!): Room
+
+  # Join an existing room
+  joinRoom(input: JoinRoomInput!): RoomMember
+
+  # Leave a room
+  leaveRoom(input: LeaveRoomInput!): Boolean
+
+  # Update user presence status
+  updatePresence(input: UpdatePresenceInput!): UserPresence
+
+  # Start typing indicator
+  startTyping(input: TypingInput!): TypingIndicator
+
+  # Stop typing indicator
+  stopTyping(input: TypingInput!): Boolean
+
+  # Update message (edit)
+  updateMessage(input: UpdateMessageInput!): Message
+
+  # Delete a message
+  deleteMessage(input: DeleteMessageInput!): Boolean
+
+  # Update room settings
+  updateRoom(input: UpdateRoomInput!): Room
+}
+
+type Subscription {
+  # Subscribe to new messages in a room
+  onMessageAdded(roomId: ID!): Message
+    @aws_subscribe(mutations: ["sendMessage"])
+
+  # Subscribe to message updates in a room
+  onMessageUpdated(roomId: ID!): Message
+    @aws_subscribe(mutations: ["updateMessage"])
+
+  # Subscribe to message deletions in a room
+  onMessageDeleted(roomId: ID!): MessageDeleted
+    @aws_subscribe(mutations: ["deleteMessage"])
+
+  # Subscribe to typing indicators in a room
+  onTyping(roomId: ID!): TypingIndicator
+    @aws_subscribe(mutations: ["startTyping", "stopTyping"])
+
+  # Subscribe to presence changes
+  onPresenceChanged(userId: ID): UserPresence
+    @aws_subscribe(mutations: ["updatePresence"])
+
+  # Subscribe to room member changes
+  onRoomMemberChanged(roomId: ID!): RoomMemberChange
+    @aws_subscribe(mutations: ["joinRoom", "leaveRoom"])
+
+  # Subscribe to room updates
+  onRoomUpdated(roomId: ID!): Room
+    @aws_subscribe(mutations: ["updateRoom"])
+}
+
+# Core Types
+type Message {
+  messageId: ID!
+  roomId: ID!
+  userId: ID!
+  content: String!
+  messageType: MessageType!
+  timestamp: AWSDateTime!
+  editedAt: AWSDateTime
+  replyToMessageId: ID
+  attachments: [Attachment]
+  metadata: AWSJSON
+  user: User
+  replyToMessage: Message
+  reactions: [Reaction]
+  readBy: [MessageRead]
+}
+
+type Room {
+  roomId: ID!
+  name: String!
+  description: String
+  roomType: RoomType!
+  createdBy: ID!
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  settings: RoomSettings
+  members: [RoomMember]
+  memberCount: Int
+  lastMessage: Message
+  lastActivity: AWSDateTime
+  metadata: AWSJSON
+}
+
+type RoomMember {
+  roomId: ID!
+  userId: ID!
+  role: RoomRole!
+  joinedAt: AWSDateTime!
+  permissions: [Permission]
+  user: User
+  presence: UserPresence
+}
+
+type User {
+  userId: ID!
+  username: String!
+  email: String
+  displayName: String
+  avatar: String
+  status: UserStatus
+  lastSeen: AWSDateTime
+}
+
+type UserPresence {
+  userId: ID!
+  status: PresenceStatus!
+  lastSeen: AWSDateTime!
+  currentRoom: ID
+  isTyping: Boolean
+  customStatus: String
+  metadata: AWSJSON
+}
+
+type TypingIndicator {
+  userId: ID!
+  roomId: ID!
+  isTyping: Boolean!
+  timestamp: AWSDateTime!
+  user: User
+}
+
+type Attachment {
+  attachmentId: ID!
+  fileName: String!
+  fileSize: Int!
+  mimeType: String!
+  url: String!
+  thumbnailUrl: String
+  metadata: AWSJSON
+}
+
+type Reaction {
+  emoji: String!
+  userId: ID!
+  timestamp: AWSDateTime!
+  user: User
+}
+
+type MessageRead {
+  userId: ID!
+  readAt: AWSDateTime!
+  user: User
+}
+
+type RoomSettings {
+  isPrivate: Boolean!
+  allowFileUploads: Boolean!
+  allowReactions: Boolean!
+  messageRetentionDays: Int
+  maxMembers: Int
+  requireApproval: Boolean!
+  allowedFileTypes: [String]
+  metadata: AWSJSON
+}
+
+# Connection Types for Pagination
+type MessageConnection {
+  items: [Message]
+  nextToken: String
+  total: Int
+}
+
+type RoomConnection {
+  items: [Room]
+  nextToken: String
+  total: Int
+}
+
+type RoomMemberConnection {
+  items: [RoomMember]
+  nextToken: String
+  total: Int
+}
+
+# Input Types
+input SendMessageInput {
+  roomId: ID!
+  content: String!
+  messageType: MessageType = TEXT
+  replyToMessageId: ID
+  attachments: [AttachmentInput]
+  metadata: AWSJSON
+}
+
+input CreateRoomInput {
+  name: String!
+  description: String
+  roomType: RoomType!
+  settings: RoomSettingsInput
+  initialMembers: [ID]
+  metadata: AWSJSON
+}
+
+input JoinRoomInput {
+  roomId: ID!
+  userId: ID
+}
+
+input LeaveRoomInput {
+  roomId: ID!
+  userId: ID
+}
+
+input UpdatePresenceInput {
+  status: PresenceStatus!
+  currentRoom: ID
+  customStatus: String
+  metadata: AWSJSON
+}
+
+input TypingInput {
+  roomId: ID!
+  userId: ID
+}
+
+input UpdateMessageInput {
+  messageId: ID!
+  roomId: ID!
+  content: String
+  attachments: [AttachmentInput]
+  metadata: AWSJSON
+}
+
+input DeleteMessageInput {
+  messageId: ID!
+  roomId: ID!
+}
+
+input UpdateRoomInput {
+  roomId: ID!
+  name: String
+  description: String
+  settings: RoomSettingsInput
+  metadata: AWSJSON
+}
+
+input AttachmentInput {
+  fileName: String!
+  fileSize: Int!
+  mimeType: String!
+  url: String!
+  thumbnailUrl: String
+  metadata: AWSJSON
+}
+
+input RoomSettingsInput {
+  isPrivate: Boolean
+  allowFileUploads: Boolean
+  allowReactions: Boolean
+  messageRetentionDays: Int
+  maxMembers: Int
+  requireApproval: Boolean
+  allowedFileTypes: [String]
+  metadata: AWSJSON
+}
+
+# Enums
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  AUDIO
+  VIDEO
+  SYSTEM
+  ANNOUNCEMENT
+}
+
+enum RoomType {
+  DIRECT
+  GROUP
+  COURSE
+  STUDY_GROUP
+  ANNOUNCEMENT
+  HELP_DESK
+}
+
+enum RoomRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+  GUEST
+}
+
+enum PresenceStatus {
+  ONLINE
+  AWAY
+  BUSY
+  OFFLINE
+  INVISIBLE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum Permission {
+  SEND_MESSAGE
+  DELETE_MESSAGE
+  EDIT_MESSAGE
+  MANAGE_MEMBERS
+  MANAGE_SETTINGS
+  PIN_MESSAGE
+  UPLOAD_FILES
+}
+
+enum SortDirection {
+  ASC
+  DESC
+}
+
+# Event Types for Subscriptions
+type MessageDeleted {
+  messageId: ID!
+  roomId: ID!
+  deletedBy: ID!
+  timestamp: AWSDateTime!
+}
+
+type RoomMemberChange {
+  roomId: ID!
+  userId: ID!
+  action: MemberAction!
+  timestamp: AWSDateTime!
+  actor: ID!
+  member: RoomMember
+}
+
+enum MemberAction {
+  JOINED
+  LEFT
+  PROMOTED
+  DEMOTED
+  BANNED
+  UNBANNED
+}
+
+# Scalar Types
+scalar AWSDateTime
+scalar AWSJSON

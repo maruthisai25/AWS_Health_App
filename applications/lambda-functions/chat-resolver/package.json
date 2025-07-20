@@ -1,0 +1,36 @@
+{
+  "name": "chat-resolver",
+  "version": "1.0.0",
+  "description": "Chat resolver Lambda function for AppSync GraphQL API",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint .",
+    "package": "zip -r ../chat-resolver.zip ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.400.0",
+    "@aws-sdk/lib-dynamodb": "^3.400.0",
+    "@aws-sdk/credential-provider-node": "^3.400.0",
+    "@opensearch-project/opensearch": "^2.3.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "appsync",
+    "graphql",
+    "chat",
+    "dynamodb",
+    "opensearch"
+  ],
+  "author": "AWS Education Platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

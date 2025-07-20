@@ -1,0 +1,326 @@
+name: Terraform Infrastructure Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-deploy.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      destroy:
+        description: 'Destroy infrastructure'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  TF_VERSION: '1.5.0'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    # Skip staging and prod for non-main branches unless manually triggered
+    if: |
+      (matrix.environment == 'dev') ||
+      (github.ref == 'refs/heads/main' && matrix.environment != 'dev') ||
+      (github.event_name == 'workflow_dispatch' && matrix.environment == github.event.inputs.environment)
+    
+    outputs:
+      dev-plan-exitcode: ${{ steps.plan-dev.outputs.exitcode }}
+      staging-plan-exitcode: ${{ steps.plan-staging.outputs.exitcode }}
+      prod-plan-exitcode: ${{ steps.plan-prod.outputs.exitcode }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init - ${{ matrix.environment }}
+        id: init
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform init -backend-config=backend.hcl
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Terraform Validate - ${{ matrix.environment }}
+        id: validate
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform validate -no-color
+
+      - name: Terraform Plan - ${{ matrix.environment }}
+        id: plan
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform plan -no-color -out=tfplan -input=false
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_github_token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Set Plan Output
+        id: plan-output
+        if: matrix.environment == 'dev'
+        run: echo "exitcode=${{ steps.plan.outputs.exitcode }}" >> $GITHUB_OUTPUT
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        if: steps.plan.outcome == 'success'
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: terraform/environments/${{ matrix.environment }}/tfplan
+          retention-days: 5
+
+      - name: Comment PR - Plan Results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan (${{ matrix.environment }})</summary>
+            
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Environment: \`${{ matrix.environment }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: |
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch')
+    
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+        
+    # Apply environments sequentially: dev -> staging -> prod
+    environment:
+      name: ${{ matrix.environment }}
+      url: ${{ steps.output.outputs.website_url }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: terraform/environments/${{ matrix.environment }}
+
+      - name: Terraform Init - ${{ matrix.environment }}
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform init -backend-config=backend.hcl
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Terraform Apply - ${{ matrix.environment }}
+        if: github.event.inputs.destroy != 'true'
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Terraform Destroy - ${{ matrix.environment }}
+        if: github.event.inputs.destroy == 'true'
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: terraform destroy -auto-approve
+        env:
+          TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Terraform Outputs
+        id: output
+        if: github.event.inputs.destroy != 'true'
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          echo "website_url=$(terraform output -raw website_url)" >> $GITHUB_OUTPUT
+          echo "api_gateway_url=$(terraform output -raw api_gateway_url)" >> $GITHUB_OUTPUT
+          echo "monitoring_dashboard_url=$(terraform output -raw monitoring_dashboard_url)" >> $GITHUB_OUTPUT
+
+      - name: Save Terraform Outputs
+        if: github.event.inputs.destroy != 'true'
+        working-directory: terraform/environments/${{ matrix.environment }}
+        run: |
+          terraform output -json > terraform-outputs-${{ matrix.environment }}.json
+
+      - name: Upload Terraform Outputs
+        uses: actions/upload-artifact@v4
+        if: github.event.inputs.destroy != 'true'
+        with:
+          name: terraform-outputs-${{ matrix.environment }}
+          path: terraform/environments/${{ matrix.environment }}/terraform-outputs-${{ matrix.environment }}.json
+          retention-days: 30
+
+      - name: Notify Deployment Success
+        if: success() && github.event.inputs.destroy != 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `🚀 **Deployment Successful** - ${{ matrix.environment }}
+            
+            **Environment URLs:**
+            - Website: ${{ steps.output.outputs.website_url }}
+            - API Gateway: ${{ steps.output.outputs.api_gateway_url }}
+            - Monitoring Dashboard: ${{ steps.output.outputs.monitoring_dashboard_url }}
+            
+            **Deployment Details:**
+            - Environment: \`${{ matrix.environment }}\`
+            - Commit: \`${{ github.sha }}\`
+            - Actor: @${{ github.actor }}
+            - Workflow: ${{ github.workflow }}`;
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Checkov Security Scan
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          quiet: true
+          soft_fail: true
+
+      - name: Upload Checkov Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+      - name: Run TFSec Security Scan
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform/
+          format: sarif
+          soft_fail: true
+
+  cost-estimation:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost Cost Estimate
+        run: |
+          infracost breakdown --path=terraform/environments/dev \
+            --format=json \
+            --out-file=infracost-base.json
+          
+          infracost diff --path=terraform/environments/dev \
+            --compare-to=infracost-base.json \
+            --format=json \
+            --out-file=infracost-diff.json
+
+      - name: Post Infracost Comment
+        run: |
+          infracost comment github --path=infracost-diff.json \
+            --repo=$GITHUB_REPOSITORY \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --behavior=update

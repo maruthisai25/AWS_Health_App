@@ -1,0 +1,21 @@
+## Create Message Function Response - Return the created message
+
+#if($ctx.error)
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+
+{
+  "messageId": "$ctx.result.message_id.S",
+  "roomId": "$ctx.result.room_id.S",
+  "userId": "$ctx.result.user_id.S",
+  "content": "$ctx.result.content.S",
+  "messageType": "$ctx.result.message_type.S",
+  "timestamp": "$ctx.result.timestamp.N",
+  #if($ctx.result.reply_to_message_id)
+  "replyToMessageId": "$ctx.result.reply_to_message_id.S",
+  #end
+  #if($ctx.result.attachments)
+  "attachments": $util.toJson($ctx.result.attachments.L),
+  #end
+  "metadata": $util.parseJson($ctx.result.metadata.S)
+}

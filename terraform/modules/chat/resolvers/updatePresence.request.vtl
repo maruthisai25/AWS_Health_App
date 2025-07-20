@@ -1,0 +1,28 @@
+## Update Presence Request - Update user presence status
+
+#set($timestamp = $util.time.nowEpochMilliSeconds())
+#set($ttl = $timestamp / 1000 + 1800) ## 30 minutes TTL
+
+{
+  "version": "2017-02-28",
+  "operation": "PutItem",
+  "key": {
+    "user_id": $util.dynamodb.toDynamoDBJson($ctx.identity.sub)
+  },
+  "attributeValues": {
+    "status": $util.dynamodb.toDynamoDBJson($ctx.args.input.status),
+    "last_seen": $util.dynamodb.toDynamoDBJson($timestamp),
+    "ttl": $util.dynamodb.toDynamoDBJson($ttl),
+    #if($ctx.args.input.currentRoom)
+    "room_id": $util.dynamodb.toDynamoDBJson($ctx.args.input.currentRoom),
+    #end
+    #if($ctx.args.input.customStatus)
+    "custom_status": $util.dynamodb.toDynamoDBJson($ctx.args.input.customStatus),
+    #end
+    #if($ctx.args.input.metadata)
+    "metadata": $util.dynamodb.toDynamoDBJson($util.toJson($ctx.args.input.metadata))
+    #else
+    "metadata": $util.dynamodb.toDynamoDBJson("{}")
+    #end
+  }
+}
