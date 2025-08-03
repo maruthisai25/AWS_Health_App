@@ -320,33 +320,10 @@ aws logs tail /aws/lambda/function-name
 5. **Deploy**: Infrastructure and application deployment
 6. **Verify**: Post-deployment health checks
 
-## 📝 Default Test Users
 
-The system automatically creates test users:
-- **Student**: `student@example.com` / `TempPassword123!`
-- **Teacher**: `teacher@example.com` / `TempPassword123!`
-- **Admin**: `admin@example.com` / `TempPassword123!`
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
 
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
 
-For support and questions:
-- 📧 Email: [your-email@domain.com]
-- 📖 Documentation: Check this README
-- 🐛 Issues: Create a GitHub issue
-- 💬 Discussions: Use GitHub Discussions
-
----
-
-**🎉 Ready to transform education with AWS!** Your platform should be running within 15 minutes of following this guide.
