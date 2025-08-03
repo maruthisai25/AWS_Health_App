@@ -1,6 +1,27 @@
 // applications/frontend/src/contexts/AuthContext.js
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Amplify, Auth } from 'aws-amplify';
+
+// Configure Amplify
+Amplify.configure({
+  Auth: {
+    region: process.env.REACT_APP_AWS_REGION,
+    userPoolId: process.env.REACT_APP_AWS_USER_POOL_ID,
+    userPoolWebClientId: process.env.REACT_APP_AWS_USER_POOL_CLIENT_ID,
+    identityPoolId: process.env.REACT_APP_AWS_IDENTITY_POOL_ID,
+    mandatorySignIn: true,
+  },
+  API: {
+    endpoints: [
+      {
+        name: 'api',
+        endpoint: process.env.REACT_APP_API_URL,
+        region: process.env.REACT_APP_AWS_REGION,
+      },
+    ],
+  },
+});
 
 const AuthContext = createContext();
 
@@ -21,22 +42,30 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        // TODO: Check for existing session/token
-        // TODO: Validate token with backend
-        // For now, check localStorage for demo purposes
-        const savedUser = localStorage.getItem('user');
-        if (savedUser) {
-          setUser(JSON.parse(savedUser));
-        }
+        const currentUser = await Auth.currentAuthenticatedUser();
+        setUser(currentUser);
       } catch (error) {
-        console.error('Auth initialization error:', error);
-        setError(error.message);
+        console.log('No authenticated user found');
+        setUser(null);
       } finally {
         setLoading(false);
       }
     };
 
     initializeAuth();
+
+    // Listen for auth state changes
+    const unsubscribe = Auth.configure().Auth?.onAuthUIStateChange?.((authState, authData) => {
+      if (authState === 'signedIn') {
+        setUser(authData);
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const login = async (email, password) => {
@@ -44,29 +73,11 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     
     try {
-      // TODO: Replace with actual API call to authentication service
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username: email, password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Login failed');
-      }
-
-      const userData = await response.json();
-      
-      // Store user data
-      setUser(userData.user);
-      localStorage.setItem('user', JSON.stringify(userData.user));
-      localStorage.setItem('accessToken', userData.accessToken);
-      localStorage.setItem('refreshToken', userData.refreshToken);
-
-      return userData;
+      const user = await Auth.signIn(email, password);
+      setUser(user);
+      return user;
     } catch (error) {
+      console.error('Login error:', error);
       setError(error.message);
       throw error;
     } finally {
@@ -79,22 +90,20 @@ export const AuthProvider = ({ children }) => {
     setError(null);
     
     try {
-      // TODO: Replace with actual API call
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const { email, password, ...attributes } = userData;
+      const result = await Auth.signUp({
+        username: email,
+        password,
+        attributes: {
+          email,
+          'custom:role': attributes.role || 'student',
+          'custom:student_id': attributes.student_id || '',
+          'custom:department': attributes.department || '',
         },
-        body: JSON.stringify(userData),
       });
-
-      if (!response.ok) {
-        throw new Error('Registration failed');
-      }
-
-      const result = await response.json();
       return result;
     } catch (error) {
+      console.error('Registration error:', error);
       setError(error.message);
       throw error;
     } finally {
@@ -106,47 +115,56 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     
     try {
-      // TODO: Call logout endpoint if needed
-      // Clear local storage
-      localStorage.removeItem('user');
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      
+      await Auth.signOut();
       setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
+      setError(error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const refreshToken = async () => {
+  const confirmSignUp = async (username, code) => {
     try {
-      const refreshToken = localStorage.getItem('refreshToken');
-      if (!refreshToken) {
-        throw new Error('No refresh token available');
-      }
-
-      // TODO: Replace with actual API call
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Token refresh failed');
-      }
-
-      const data = await response.json();
-      localStorage.setItem('accessToken', data.accessToken);
-      
-      return data.accessToken;
+      await Auth.confirmSignUp(username, code);
+      return { success: true };
     } catch (error) {
-      console.error('Token refresh error:', error);
-      logout(); // Clear session if refresh fails
+      console.error('Confirmation error:', error);
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  const resendConfirmationCode = async (username) => {
+    try {
+      await Auth.resendSignUp(username);
+      return { success: true };
+    } catch (error) {
+      console.error('Resend confirmation error:', error);
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  const forgotPassword = async (username) => {
+    try {
+      await Auth.forgotPassword(username);
+      return { success: true };
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      setError(error.message);
+      throw error;
+    }
+  };
+
+  const forgotPasswordSubmit = async (username, code, newPassword) => {
+    try {
+      await Auth.forgotPasswordSubmit(username, code, newPassword);
+      return { success: true };
+    } catch (error) {
+      console.error('Password reset error:', error);
+      setError(error.message);
       throw error;
     }
   };
@@ -158,7 +176,10 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
-    refreshToken,
+    confirmSignUp,
+    resendConfirmationCode,
+    forgotPassword,
+    forgotPasswordSubmit,
   };
 
   return (

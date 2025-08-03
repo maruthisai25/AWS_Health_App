@@ -14,6 +14,11 @@
 const AWS = require('aws-sdk');
 const Joi = require('joi');
 
+// Validate required environment variables
+if (!process.env.USER_POOL_ID || !process.env.USER_POOL_CLIENT_ID) {
+    throw new Error('Missing required environment variables: USER_POOL_ID, USER_POOL_CLIENT_ID');
+}
+
 // Initialize AWS services
 const cognito = new AWS.CognitoIdentityServiceProvider({
     region: process.env.REGION

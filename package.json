@@ -8,15 +8,7 @@
     "install:all": "npm run install:frontend && npm run install:lambda-functions && npm run install:backend",
     "install:frontend": "cd applications/frontend && npm install",
     "install:backend": "cd applications/backend-services/marks-api && npm install",
-    "install:lambda-functions": "for /d %d in (applications\\lambda-functions\\*) do (cd \"%d\" && npm install && cd ..\\..\\..)",
-    "test": "npm run test:frontend && npm run test:lambda && npm run test:integration",
-    "test:frontend": "cd applications/frontend && npm test",
-    "test:lambda": "npm run test:lambda-functions",
-    "test:lambda-functions": "for /d %d in (applications\\lambda-functions\\*) do (cd \"%d\" && npm test && cd ..\\..\\..)",
-    "test:integration": "cd tests && npm test",
-    "lint": "npm run lint:frontend && npm run lint:lambda",
-    "lint:frontend": "cd applications/frontend && npm run lint",
-    "lint:lambda": "for /d %d in (applications\\lambda-functions\\*) do (cd \"%d\" && npm run lint && cd ..\\..\\..)",
+    "install:lambda-functions": "find applications/lambda-functions -name package.json -execdir npm install \\;",
     "build": "npm run build:frontend",
     "build:frontend": "cd applications/frontend && npm run build",
     "deploy:dev": "cd terraform/environments/dev && terraform apply",
@@ -26,7 +18,8 @@
     "terraform:plan": "cd terraform/environments/dev && terraform plan",
     "terraform:apply": "cd terraform/environments/dev && terraform apply",
     "terraform:destroy": "cd terraform/environments/dev && terraform destroy",
-    "setup:env": "copy .env.template .env",
+    "setup:env": "./scripts/setup-environment.sh",
+    "install:deps": "./scripts/install-dependencies.sh",
     "verify:deployment": "node scripts/verify-deployment.js"
   },
   "repository": {
@@ -60,28 +53,6 @@
   "workspaces": [
     "applications/frontend",
     "applications/backend-services/*",
-    "applications/lambda-functions/*",
-    "tests"
-  ],
-  "devDependencies": {
-    "eslint": "^8.0.0",
-    "prettier": "^2.0.0",
-    "jest": "^29.0.0",
-    "husky": "^8.0.0",
-    "lint-staged": "^13.0.0"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
-    }
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,yml,yaml}": [
-      "prettier --write"
-    ]
-  }
+    "applications/lambda-functions/*"
+  ]
 }

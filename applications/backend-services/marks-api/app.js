@@ -39,12 +39,25 @@ let dbPool;
 
 async function initializeDatabase() {
   try {
-    console.log('Retrieving database credentials from Secrets Manager...');
-    const secret = await secretsManager.getSecretValue({
-      SecretId: process.env.DB_SECRET_ARN
-    }).promise();
+    let credentials;
     
-    const credentials = JSON.parse(secret.SecretString);
+    if (process.env.DB_SECRET_ARN) {
+      console.log('Retrieving database credentials from Secrets Manager...');
+      const secret = await secretsManager.getSecretValue({
+        SecretId: process.env.DB_SECRET_ARN
+      }).promise();
+      
+      credentials = JSON.parse(secret.SecretString);
+    } else {
+      // Fallback to environment variables for development
+      credentials = {
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 5432,
+        dbname: process.env.DB_NAME || 'education_platform_dev',
+        username: process.env.DB_USERNAME || 'eduadmin',
+        password: process.env.DB_PASSWORD || 'password'
+      };
+    }
     
     dbPool = new Pool({
       host: credentials.host,

@@ -1,70 +1,45 @@
 {
-  "name": "marks-management-api",
+  "name": "marks-api",
   "version": "1.0.0",
-  "description": "Marks Management API for AWS Education Platform",
+  "description": "Express.js API for managing student grades and marks",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
     "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "migrate": "node migrations/migrate.js",
-    "seed": "node migrations/seed.js"
+    "lint": "eslint *.js",
+    "migrate": "node migrations/migrate.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "pg": "^8.11.3",
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "morgan": "^1.10.0",
-    "dotenv": "^16.3.1",
-    "joi": "^17.11.0",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "aws-sdk": "^2.1490.0",
     "compression": "^1.7.4",
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
-    "uuid": "^9.0.1",
-    "moment": "^2.29.4",
-    "lodash": "^4.17.21",
-    "multer": "^1.4.5-lts.1",
-    "csv-parser": "^3.0.0",
-    "json2csv": "^6.1.0"
+    "aws-sdk": "^2.1490.0",
+    "pg": "^8.11.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
     "jest": "^29.7.0",
     "supertest": "^6.3.3",
-    "eslint": "^8.52.0",
-    "prettier": "^3.0.3",
-    "@types/jest": "^29.5.8"
+    "eslint": "^8.52.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [
-    "education",
-    "marks",
-    "grades",
-    "api",
     "express",
-    "postgresql",
-    "aws"
+    "api",
+    "grades",
+    "marks",
+    "education",
+    "postgresql"
   ],
-  "author": "AWS Education Platform Team",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/your-org/aws-education-platform.git"
-  },
-  "bugs": {
-    "url": "https://github.com/your-org/aws-education-platform/issues"
-  },
-  "homepage": "https://github.com/your-org/aws-education-platform#readme"
+  "author": "Education Platform Team",
+  "license": "MIT"
 }

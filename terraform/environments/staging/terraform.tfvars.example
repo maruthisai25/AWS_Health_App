@@ -1,4 +1,4 @@
-# AWS Education Platform - Development Environment Variables
+# AWS Education Platform - Staging Environment Variables
 # Copy this file to terraform.tfvars and update with your actual values
 
 # AWS Configuration
@@ -7,15 +7,15 @@ aws_region     = "us-east-1"
 
 # Project Configuration
 project_name = "education-platform"
-environment  = "dev"
-cost_center  = "education-dev"
+environment  = "staging"
+cost_center  = "education-staging"
 owner        = "platform-team"
 
 # Networking Configuration
-vpc_cidr = "10.0.0.0/16"
+vpc_cidr = "10.1.0.0/16"
 
 # Database Configuration
-db_name     = "education_platform_dev"
+db_name     = "education_platform_staging"
 db_username = "eduadmin"
 db_password = "YourSecurePassword123!"  # Change this to a secure password
 
@@ -24,42 +24,42 @@ enable_chat          = true
 enable_video         = true
 enable_attendance    = true
 enable_marks         = true
-enable_notifications = false  # Disabled by default for dev
+enable_notifications = true
 enable_security      = true
 enable_monitoring    = true
 
-# Development Settings
-enable_detailed_monitoring = false
-enable_debug_logging      = true
-log_retention_days        = 7
+# Staging Settings
+enable_detailed_monitoring = true
+enable_debug_logging      = false
+log_retention_days        = 14
 
 # Security Configuration
-allowed_cidr_blocks = ["0.0.0.0/0"]  # Restrict this in production
-enable_bastion_host = false
+allowed_cidr_blocks = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]  # Restrict to private networks
+enable_bastion_host = true
 
 # Cost Optimization
 cost_optimization_enabled = true
-auto_stop_instances      = false
-use_spot_instances       = false
+auto_stop_instances      = true
+use_spot_instances       = true
 
 # Backup Configuration
-backup_retention_days      = 1
-enable_deletion_protection = false
+backup_retention_days      = 7
+enable_deletion_protection = true
 
 # Development Tools
-enable_development_tools = true
+enable_development_tools = false
 create_development_user  = false
 
 # Testing Configuration
-enable_test_data = true
-test_user_count  = 10
+enable_test_data = false
+test_user_count  = 0
 
 # Performance Configuration
-performance_mode = "standard"
+performance_mode = "provisioned"
 
 # Additional Tags
 additional_tags = {
-  Environment = "development"
-  Purpose     = "education-platform-dev"
+  Environment = "staging"
+  Purpose     = "education-platform-staging"
   AutoStop    = "true"
 }

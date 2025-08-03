@@ -72,6 +72,8 @@ exports.handler = async (event) => {
     switch (action) {
       case 'createRoom':
         return await createRoom(event);
+      case 'getRooms':
+        return await getUserRooms(event);
       case 'searchMessages':
         return await searchMessages(event);
       case 'getRoomMembers':

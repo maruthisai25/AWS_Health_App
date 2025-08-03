@@ -1,29 +1,33 @@
 {
   "name": "auth-handler",
   "version": "1.0.0",
-  "description": "Authentication handler for AWS Education Platform",
+  "description": "AWS Lambda function for handling authentication operations",
   "main": "index.js",
   "scripts": {
     "test": "jest",
-    "lint": "eslint index.js"
+    "lint": "eslint *.js",
+    "package": "zip -r auth-handler.zip index.js node_modules/ package.json",
+    "build": "npm install --production"
   },
   "dependencies": {
-    "aws-sdk": "^2.1490.0",
-    "jsonwebtoken": "^9.0.2",
-    "bcryptjs": "^2.4.3",
+    "@aws-sdk/client-cognito-identity-provider": "^3.450.0",
+    "@aws-sdk/client-secrets-manager": "^3.450.0",
     "joi": "^17.11.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "eslint": "^8.53.0"
+    "eslint": "^8.52.0",
+    "@types/jest": "^29.5.0"
   },
   "keywords": [
     "aws",
     "lambda",
     "authentication",
-    "cognito",
-    "education"
+    "cognito"
   ],
   "author": "Education Platform Team",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

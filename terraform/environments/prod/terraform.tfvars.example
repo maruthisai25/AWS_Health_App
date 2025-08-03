@@ -1,0 +1,66 @@
+# AWS Education Platform - Production Environment Variables
+# Copy this file to terraform.tfvars and update with your actual values
+
+# AWS Configuration
+aws_account_id = "123456789012"  # Replace with your AWS Account ID
+aws_region     = "us-east-1"
+
+# Project Configuration
+project_name = "education-platform"
+environment  = "prod"
+cost_center  = "education-production"
+owner        = "platform-team"
+
+# Networking Configuration
+vpc_cidr = "10.2.0.0/16"
+
+# Database Configuration
+db_name     = "education_platform_prod"
+db_username = "eduadmin"
+db_password = "YourVerySecureProductionPassword123!"  # Use AWS Secrets Manager in production
+
+# Feature Flags
+enable_chat          = true
+enable_video         = true
+enable_attendance    = true
+enable_marks         = true
+enable_notifications = true
+enable_security      = true
+enable_monitoring    = true
+
+# Production Settings
+enable_detailed_monitoring = true
+enable_debug_logging      = false
+log_retention_days        = 90
+
+# Security Configuration
+allowed_cidr_blocks = ["10.0.0.0/8"]  # Highly restricted for production
+enable_bastion_host = true
+
+# Cost Optimization
+cost_optimization_enabled = true
+auto_stop_instances      = false  # Keep production running
+use_spot_instances       = false  # Use on-demand for reliability
+
+# Backup Configuration
+backup_retention_days      = 30
+enable_deletion_protection = true
+
+# Development Tools
+enable_development_tools = false
+create_development_user  = false
+
+# Testing Configuration
+enable_test_data = false
+test_user_count  = 0
+
+# Performance Configuration
+performance_mode = "provisioned"
+
+# Additional Tags
+additional_tags = {
+  Environment = "production"
+  Purpose     = "education-platform-prod"
+  AutoStop    = "false"
+  Compliance  = "required"
+}
