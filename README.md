@@ -39,25 +39,6 @@ This project implements a comprehensive education platform on AWS featuring:
 5. Git and GitHub account
 6. Domain name (optional)
 
-### Using tasks.md
-
-The `tasks.md` file contains 13 detailed tasks that break down the entire implementation into manageable chunks. Each task is:
-- Self-contained and can be given to an LLM independently
-- Includes all necessary context and requirements
-- Specifies exact files to create
-- Provides implementation details and best practices
-
-#### How to use with an LLM:
-1. Copy the entire content of a single task from `tasks.md`
-2. Provide it to your LLM with a prompt like:
-   ```
-   Please implement [Task Name] exactly as specified below. 
-   Generate all the files listed with complete, production-ready code.
-   
-   [Paste Task Content]
-   ```
-3. Review and save the generated files
-4. Move to the next task
 
 ### Required Credentials
 
@@ -164,18 +145,6 @@ aws-education-platform/
 - Regular backup procedures
 - Disaster recovery plan
 
-## Contributing
 
-1. Follow the task structure in `tasks.md`
-2. Ensure all code includes tests
-3. Update documentation as needed
-4. Use conventional commits
-5. Create feature branches
 
-## License
 
-[Your License Here]
-
-## Contact
-
-[Your Contact Information]
